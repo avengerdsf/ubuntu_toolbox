@@ -51,6 +51,7 @@ int main() {
     std::cout << "2. Shell Script Template Generator" << std::endl;
     std::cout << "3. External Library / Driver Manager" << std::endl;
     std::cout << "4. External SoftWare Manager" << std::endl;
+    std::cout << "5. External SoftWare Manager" << std::endl;
     std::cout << "0. Exit" << std::endl;
     std::cout << "------------------------------------------" << std::endl;
 
@@ -77,6 +78,9 @@ int main() {
       break;
     case 4:
       external_software();
+      break;
+    case 5:
+      conda_setup_menu();
       break;
     case 0:
       return 0; // 退出程序

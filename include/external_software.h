@@ -1,88 +1,92 @@
-#pragma once
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
-#include <memory>
+#ifndef EXTERNAL_SOFTWARE_H
+#define EXTERNAL_SOFTWARE_H
+
 #include <string>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <vector>
+#include <map>
+#include <memory>
+#include <functional>
 
-extern const std::string TEMP_DIR;
+#include <iostream>
+#include <fstream>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <unistd.h>
+#include <array>
 
-class SoftwareInstaller;
-class ClashInstaller;
-class SogouInstaller;
-class TmuxInstaller;
-
-// SoftwareItem 结构体
-struct SoftwareItem {
-  std::string name;
-  std::string type;
-  std::unique_ptr<SoftwareInstaller> installer;
-  bool has_config = false;
+enum class InstallType {
+    APT, DEB_URL, DEB_MANUAL, SCRIPT
 };
 
-extern std::vector<SoftwareItem> SOFTWARE_LIST;
-// 初始化软件列表
+struct SoftwareConfig {
+    std::string id;
+    std::string display_name;
+    InstallType type;
+    std::string pkg_name;
+    std::map<std::string, std::string> arch_urls; 
+    std::vector<std::string> dependencies;
+    std::string website;
+};
 
 class SoftwareInstaller {
 public:
-  SoftwareInstaller(const std::string &pkg, const std::string &name)
-      : pkg_id(pkg), display_name(name) {}
-  virtual ~SoftwareInstaller() = default;
-  bool uninstall();
-  virtual void install() = 0;
-  virtual void configure() {} // 默认空实现，子类可覆盖
+    explicit SoftwareInstaller(SoftwareConfig config);
+    virtual ~SoftwareInstaller() = default;
+
+    void install();
+    void uninstall();
+
+    std::string get_id() const { return config.id; }
+    std::string get_name() const { return config.display_name; }
+    
+    // [修改点 1] 将 is_installed 移到 public 区域
+    bool is_installed(); 
 
 protected:
-  bool is_installed();
-  int exec_system(const std::string &cmd);
-  std::string create_temp_dir();
-  void print_info(const std::string &msg, const std::string &color = "\033[0m");
-  std::string get_user_home() const;
-  void clear_screen() const;
-  std::string detect_arch() const;
+    SoftwareConfig config;
+    virtual void post_install() {} 
+    virtual void post_uninstall() {}
 
-  const std::string pkg_id;
-  const std::string display_name;
-};
-
-class ClashInstaller : public SoftwareInstaller {
-public:
-  ClashInstaller(const std::string &pkg_id, const std::string &display_name,
-                 const std::string &url_amd64, const std::string &url_arm64);
-
-  void install() override;
+    // 工具函数
+    std::string detect_arch();
+    std::string get_user_home();
+    void print_info(const std::string &msg, const std::string &color);
+    int exec_sys(const std::string &cmd);
+    std::string create_temp_dir();
 
 private:
-  std::string url_amd64;
-  std::string url_arm64;
-
-  std::string get_target_url();
+    void install_dependencies();
+    bool perform_core_installation(); 
+    std::string find_local_deb(const std::string& arch); 
 };
 
+struct SoftwareItem {
+    std::string id;
+    std::string category;
+    std::unique_ptr<SoftwareInstaller> installer;
+};
+
+
+// Sogou Installer (自定义环境配置)
 class SogouInstaller : public SoftwareInstaller {
-public:
-  SogouInstaller(const std::string &pkg_id, const std::string &display_name,
-                 const std::string &website_url);
-
-  void install() override;
-  void configure() override; // 可选：配置 fcitx
-
-private:
-  std::string website_url;
-
-  std::string get_default_download_dir();
-  std::string find_deb_file(const std::string &user_home,
-                            const std::string &arch);
+    public:
+        explicit SogouInstaller(SoftwareConfig config) : SoftwareInstaller(config) {}    
+    protected:
+        void post_install() override ;
 };
 
 class TmuxInstaller : public SoftwareInstaller {
-public:
-  TmuxInstaller(const std::string &pkg_id, const std::string &display_name);
-  void install() override;
-  void configure() override;
+    public:
+    
+        explicit TmuxInstaller(SoftwareConfig config) : SoftwareInstaller(config) {}
 
-private:
+        
+    protected:
+        void post_install() override ;
 };
+
+extern std::vector<SoftwareItem> SOFTWARE_LIST;
+void init_software_list();
+
+#endif

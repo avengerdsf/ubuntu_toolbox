@@ -1,14 +1,5 @@
 #include "sub_menu.h"
-#include "unit_color.h"
-#include <cstdio>
-#include <cstdlib>
-#include <fstream>
-#include <iostream>
-#include <map>
-#include <regex>
-#include <sstream>
-#include <unistd.h>
-#include <vector>
+
 
 const std::string RULES_FILE = "/etc/udev/rules.d/99-usb-serial.rules";
 
@@ -59,14 +50,14 @@ void bind_device() {
   std::string ls_result = exec_cmd("ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null");
   if (ls_result.empty()) {
     std::cout << RED << "No USB serial devices found." << NC << std::endl;
-    std::cout << "Press Enter to continue...";
+    std::cout << "Press Enter to return...";
     std::cin.get();
     return;
   }
 
   std::istringstream ss(ls_result);
   std::vector<std::string> devices;
-  std::string dev; // 从字符串流中按空格读取一个单词
+  std::string dev;
   while (ss >> dev)
     devices.push_back(dev);
 
@@ -83,8 +74,7 @@ void bind_device() {
 
   int i = 1;
   for (const auto &d : devices) {
-    std::string info = exec_cmd("udevadm info --query=property --name=" +
-                                d); // 执行命令返回为字符串
+    std::string info = exec_cmd("udevadm info --query=property --name=" + d);
     std::regex vid_re("ID_VENDOR_ID=(.*)");
     std::regex pid_re("ID_MODEL_ID=(.*)");
     std::regex serial_re("ID_SERIAL_SHORT=(.*)");
@@ -92,20 +82,16 @@ void bind_device() {
     std::smatch match;
 
     std::string vid = "", pid = "", serial = "", model = "";
-    if (std::regex_search(info, match, vid_re))
-      vid = match[1];
-    if (std::regex_search(info, match, pid_re))
-      pid = match[1];
-    if (std::regex_search(info, match, serial_re))
-      serial = match[1];
+    if (std::regex_search(info, match, vid_re)) vid = match[1];
+    if (std::regex_search(info, match, pid_re)) pid = match[1];
+    if (std::regex_search(info, match, serial_re)) serial = match[1];
+    
     // 简单处理 Model
     std::string vendor = "", model_name = "";
     std::regex vendor_re("ID_VENDOR=(.*)");
     std::regex modelname_re("ID_MODEL=(.*)");
-    if (std::regex_search(info, match, vendor_re))
-      vendor = match[1];
-    if (std::regex_search(info, match, modelname_re))
-      model_name = match[1];
+    if (std::regex_search(info, match, vendor_re)) vendor = match[1];
+    if (std::regex_search(info, match, modelname_re)) model_name = match[1];
     model = vendor + " " + model_name;
 
     dev_vid[i] = vid;
@@ -117,18 +103,41 @@ void bind_device() {
            serial.empty() ? "None" : serial.c_str());
     ++i;
   }
+  // [新增] 打印返回选项
+  printf("[0] %-15s\n", "Cancel / Return");
 
   // 选择设备
   int choice;
-  std::cout << "Select device number: ";
-  std::cin >> choice;
-  if (choice < 1 || choice >= i)
-    return;
+  while (true) {
+    std::cout << "Select device number (0 to cancel): ";
+    if (!(std::cin >> choice)) {
+      std::cin.clear();
+      std::cin.ignore(1024, '\n');
+      std::cout << RED << "Invalid input." << NC << std::endl;
+      continue;
+    }
+    // [新增] 处理返回逻辑
+    if (choice == 0) {
+      std::cin.ignore(1024, '\n'); // 清理缓冲区
+      return; 
+    }
+    
+    if (choice < 1 || choice >= i) {
+      std::cout << RED << "Invalid device number." << NC << std::endl;
+      continue;
+    }
+    std::cin.ignore(1024, '\n');
+    break;
+  }
 
   std::string suffix;
   while (true) {
-    std::cout << "Enter suffix (e.g. px4, lidar): ";
+    std::cout << "Enter suffix (e.g. px4, lidar) or '0' to cancel: ";
     std::cin >> suffix;
+    
+    // [新增] 处理返回逻辑
+    if (suffix == "0") return;
+
     if (std::regex_match(suffix, std::regex("[a-zA-Z0-9_]+")))
       break;
     std::cout << RED << "Invalid suffix." << NC << std::endl;
@@ -146,6 +155,61 @@ void bind_device() {
   std::string rule =
       "SUBSYSTEM==\"tty\", " + rule_cond + ", SYMLINK+=\"" + symlink + "\"";
 
+  // -------------------- 重复绑定检测 --------------------
+  std::ifstream ifs(RULES_FILE);
+  std::string line;
+  bool same_device = false;
+  bool same_symlink = false;
+
+  while (std::getline(ifs, line)) {
+    if (!serial.empty()) {
+      if (line.find("ATTRS{idVendor}==\"" + vid + "\"") != std::string::npos &&
+          line.find("ATTRS{idProduct}==\"" + pid + "\"") != std::string::npos &&
+          line.find("ATTRS{serial}==\"" + serial + "\"") != std::string::npos) {
+        same_device = true;
+      }
+    }
+    if (line.find("SYMLINK+=\"" + symlink + "\"") != std::string::npos) {
+      same_symlink = true;
+    }
+  }
+  ifs.close();
+
+  if (same_device || same_symlink) {
+    std::cout << RUL_YELLOW << "Existing binding detected:" << NC << std::endl;
+
+    if (same_device)
+      std::cout << " - This device (with same serial) is already bound."
+                << std::endl;
+    if (same_symlink)
+      std::cout << " - Symlink name already exists." << std::endl;
+
+    std::cout << "Overwrite existing binding? (y/n): ";
+    char ans;
+    std::cin >> ans;
+    std::cin.ignore(1024, '\n');
+
+    if (ans != 'y' && ans != 'Y') {
+      std::cout << "Operation cancelled." << std::endl;
+      std::cout << "Press Enter to return...";
+      std::cin.get();
+      return;
+    }
+
+    std::string sed_cmd;
+    if (same_device) {
+      sed_cmd += "sed -i '/ATTRS{idVendor}==\"" + vid +
+                 "\".*ATTRS{idProduct}==\"" + pid +
+                 "\".*ATTRS{serial}==\"" + serial + "\"/d' " + RULES_FILE;
+      system(sed_cmd.c_str());
+    }
+
+    if (same_symlink) {
+      sed_cmd = "sed -i '/SYMLINK+=\"" + symlink + "\"/d' " + RULES_FILE;
+      system(sed_cmd.c_str());
+    }
+  }
+
   // 写入规则文件
   std::ofstream ofs(RULES_FILE, std::ios::app);
   ofs << "\n# Device mapped | Strategy: "
@@ -156,7 +220,7 @@ void bind_device() {
   reload_udev();
   std::cout << GREEN << "Device bound successfully!" << NC << std::endl;
   std::cout << "Press Enter to continue...";
-  std::cin.ignore();
+  std::cin.ignore(); // 此时缓冲区应该是空的，但为了保险
   std::cin.get();
 }
 
@@ -169,7 +233,7 @@ void unbind_device() {
   std::string rules_output = exec_cmd(grep_cmd);
   if (rules_output.empty()) {
     std::cout << RUL_YELLOW << "No bindings found." << NC << std::endl;
-    std::cout << "Press Enter to continue...";
+    std::cout << "Press Enter to return...";
     std::cin.get();
     return;
   }
@@ -185,19 +249,48 @@ void unbind_device() {
   }
 
   int idx;
-  std::cout << "Select rule number to delete: ";
-  std::cin >> idx;
-  if (idx < 1 || idx > (int)rules.size())
-    return;
+  // [修改] 提示可以输入 0 退出
+  std::cout << "Select rule number to delete (0 to cancel): ";
+  if (!(std::cin >> idx)) {
+      std::cin.clear();
+      std::cin.ignore(1024, '\n');
+      return;
+  }
+  
+  // [新增] 处理返回逻辑
+  if (idx == 0) {
+      return;
+  }
 
-  // 删除对应规则
-  std::string sed_cmd = "sed -i \"/" + rules[idx - 1] + "/d\" " + RULES_FILE;
+  if (idx < 1 || idx > (int)rules.size()) {
+      std::cout << RED << "Invalid selection." << NC << std::endl;
+      sleep_sec(1);
+      return;
+  }
+
+  // 从规则中提取 SYMLINK 名称，例如 tty_px4
+  std::regex link_re("SYMLINK\\+=\"([^\"]+)\"");
+  std::smatch match;
+  std::string symlink;
+
+  if (std::regex_search(rules[idx - 1], match, link_re)) {
+    symlink = match[1];
+  } else {
+    std::cout << RED << "Failed to parse SYMLINK." << NC << std::endl;
+    std::cin.ignore(1024, '\n');
+    std::cin.get();
+    return;
+  }
+
+  // 仅按 SYMLINK 删除
+  std::string sed_cmd =
+      "sed -i '/SYMLINK+=\"" + symlink + "\"/d' " + RULES_FILE;
   system(sed_cmd.c_str());
 
   reload_udev();
   std::cout << GREEN << "Binding removed successfully!" << NC << std::endl;
   std::cout << "Press Enter to continue...";
-  std::cin.ignore();
+  std::cin.ignore(1024, '\n'); // 清理掉 cin >> idx 留下的换行符
   std::cin.get();
 }
 
@@ -210,8 +303,13 @@ void usb_serial_menu() {
                  "Return to Main Toolbox\n";
     std::cout << "Choice: ";
     std::string choice;
-    std::cin >> choice;
-    std::cin.ignore(); // 忽略回车
+    if (!(std::cin >> choice)) {
+      std::cin.clear();
+      std::cin.ignore(1024, '\n');
+      continue;
+    }
+    std::cin.ignore(1024, '\n');
+
     if (choice == "0")
       break;
     else if (choice == "1")

@@ -1,5 +1,7 @@
 // template_generator.cpp
 #include "sub_menu.h"
+#include "common_utils.h"
+#include "unit_color.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -12,14 +14,6 @@
 #include <vector>
 
 using namespace std;
-
-// ANSI Colors
-const string RED = "\033[0;31m";
-const string GREEN = "\033[0;32m";
-const string YELLOW = "\033[1;33m";
-const string CYAN = "\033[0;36m";
-const string PURPLE = "\033[0;35m";
-const string NC = "\033[0m";
 
 // --- Module Configuration ---
 vector<pair<string, string>> MODULES; // first: description, second: command
@@ -231,36 +225,6 @@ void generate_tmux_layout(const std::string &full_path, int pane_count,
 void reset_selection_state() {
   SELECTED_STATE.assign(MODULES.size(), 0);
   HIGHLIGHT_IDX = 0;
-}
-
-std::string expand_user_path(const std::string &path) {
-  if (path.empty())
-    return path;
-
-  if (path[0] == '~') {
-    std::string home;
-
-    // 优先使用 sudo 用户的 home
-    const char *sudo_user = getenv("SUDO_USER");
-    if (sudo_user) {
-      home = "/home/";
-      home += sudo_user;
-    } else {
-      const char *env_home = getenv("HOME");
-      if (env_home)
-        home = env_home;
-    }
-
-    if (home.empty())
-      return path; // fallback
-
-    if (path.size() == 1)
-      return home; // "~"
-    if (path[1] == '/')
-      return home + path.substr(1); // "~/xxx"
-  }
-
-  return path; // 非 ~ 开头
 }
 
 // --- Main Menu Interface ---
