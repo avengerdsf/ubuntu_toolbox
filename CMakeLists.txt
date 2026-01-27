@@ -15,11 +15,6 @@ add_executable(main_toolbox
     src/external_software.cpp
     src/template_generator.cpp
     src/conda_setup.cpp
-    src/common_utils.cpp
-    src/soft_manager/soft_manager.cpp
-    # src/soft_manager/clash_verge_installer.cpp
-    src/soft_manager/sogou.cpp
-    src/soft_manager/tmux.cpp
 )
 
 # 4. 关键配置：全静态链接设置
