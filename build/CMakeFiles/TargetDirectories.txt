@@ -1,3 +1,0 @@
-/home/chen/my_code/ubuntu_toolbox/build/CMakeFiles/main_toolbox.dir
-/home/chen/my_code/ubuntu_toolbox/build/CMakeFiles/edit_cache.dir
-/home/chen/my_code/ubuntu_toolbox/build/CMakeFiles/rebuild_cache.dir
