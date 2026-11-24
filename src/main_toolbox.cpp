@@ -1,4 +1,7 @@
 #include <cstdlib> // system()
+#include <cerrno>
+#include <limits>
+#include <fcntl.h>
 #include <iostream>
 #include <string>
 #include <sys/stat.h>
@@ -18,11 +21,54 @@ void check_root_exit() {
   }
 }
 
-// 创建 temp 文件夹（如果不存在）
+// 创建 temp 文件夹，并将所有权交给 sudo 的原始用户。
 void create_temp_dir() {
-  if (access(TEMP_DIR.c_str(), F_OK) != 0) { // 不存在就创建
-    mkdir(TEMP_DIR.c_str(), 0755);
+  auto fail = []() {
+    std::cerr << RED << "Failed to prepare " << TEMP_DIR << NC << std::endl;
+    std::exit(EXIT_FAILURE);
+  };
+
+  if (mkdir(TEMP_DIR.c_str(), 0755) != 0 && errno != EEXIST) {
+    fail();
   }
+
+  // 不跟随符号链接，确保修改的是实际目录。
+  int fd = open(TEMP_DIR.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  if (fd < 0) {
+    fail();
+  }
+
+  const char* uid_text = std::getenv("SUDO_UID");
+  const char* gid_text = std::getenv("SUDO_GID");
+  if (uid_text && gid_text) {
+    auto parse_id = [](const char* value, unsigned long max_id,
+                       unsigned long& result) {
+      if (!*value) return false;
+      for (const char* p = value; *p; ++p) {
+        if (*p < '0' || *p > '9') return false;
+      }
+      errno = 0;
+      char* end = nullptr;
+      result = std::strtoul(value, &end, 10);
+      return errno == 0 && *end == '\0' && result < max_id;
+    };
+
+    unsigned long uid, gid;
+    if (!parse_id(uid_text, std::numeric_limits<uid_t>::max(), uid) ||
+        !parse_id(gid_text, std::numeric_limits<gid_t>::max(), gid) ||
+        fchown(fd, static_cast<uid_t>(uid), static_cast<gid_t>(gid)) != 0 ||
+        fchmod(fd, 0755) != 0) {
+      close(fd);
+      fail();
+    }
+  } else {
+    close(fd);
+    std::cerr << RED << "Start with sudo from your regular user account."
+              << NC << std::endl;
+    std::exit(EXIT_FAILURE);
+  }
+
+  close(fd);
 }
 
 // 清理 temp 文件夹
